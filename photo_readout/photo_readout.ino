@@ -100,7 +100,18 @@ void loop()
       xIntensity[i] = 1e6 / xResistance[i];
       yIntensity[i] = 1e6 / yResistance[i];
       zIntensity[i] = 1e6 / zResistance[i];
-      
+      Serial.prnt("\tRx: ");
+      Serial.print(xResistance[i]);
+      Serial.print("\tRy: ");
+      Serial.print(yResistance[i]);
+      Serial.print("\tRz: ");
+      Serial.print(zResistance[i]);
+      Serial.print("\tIx: ");
+      Serial.print(xIntensity[i]);
+      Serial.print("\tIy: ");
+      Serial.print(yIntensity[i]);
+      Serial.print("\tIz: ");
+      Serial.println(zIntensity[i]);
     }
     lastT = micros();
   }
