@@ -15,7 +15,6 @@ constexpr int REDUNDANCY = 4; // number of redundant readings to average out noi
 constexpr int AVG_SIZE = 1;
 
 uint32_t maxADC = (pow(2, 10) - 1) * AVG_SIZE;
-//constexpr float Llimit = 4.9 *  // Lowest voltage that we will consider 
 
 constexpr int outPin[3][REDUNDANCY] = {{2, 3, 4, 5}, { 6, 7, 8, 9}, {10, 11, 12, 13}}; // output pins for the sensors
 
@@ -48,30 +47,45 @@ float nearestNeighbor(float* pVals, char str){
   int invalids = 0;
   float valMax = pVals[0]; 
   for (int i=0; i < REDUNDANCY; i++){
-    // count the numper of invalid measurements (set below 0)
-    if (pVals[i] < 0){invalids += 1;}
-    if (pVals[i] > valMax){valMax = pVals[i];}
+    // Count the numper of invalid measurements (set below 0)
+    if (pVals[i] < 0){
+      invalids += 1;
+      }
+    // Save the maximum
+    if (pVals[i] > valMax){
+      valMax = pVals[i];
+      }
     for (int j=i+1; j < REDUNDANCY; j++){
       float diffNew = fabs(pVals[i] - pVals[j]);
-      // Update to the smallest difference
-      if ((diffNew < diff || diff==-1) && (pVals[i])!= -1){diff = diffNew; p1 = i; p2 = j;}
+      // Update to the smallest difference if not -1
+      if ( pVals[i] != -1 && pVals[j] != -1 && (diffNew < diff || diff==-1) ) {
+        diff = diffNew; 
+        p1 = i; 
+        p2 = j;
+        }
     }
   }
-  // At least two valid indices
-  if (p1 !=-1 || p2 !=-1){  
-    float nearestAverage = (pVals[p1] + pVals[p2])/2;
-    return nearestAverage;
-    }
   // Everything is invalid -> return 0?
-  else if (invalids == 4){
+  if (invalids == 4){
+    Serial.print(" ALL BAD ");
     return 0; 
   }
   // Redundancy is exhausted -> return only valid
   else if (invalids ==3){
+    Serial.print(" EDGING ");
     return valMax;
-  } 
+  }
+  // At least two valid indices
+  else if (p1 !=-1 && p2 !=-1){  
+    float nearestAverage = (pVals[p1] + pVals[p2])/2;
+    Serial.print(" ALL GOOD ");
+    Serial.print("  Invalids  ");
+    Serial.print(invalids);
+    return nearestAverage;
+    }
   // Fkd up big
   else {
+    Serial.print(" TF ??? ");
     return -1; 
     }
 }
@@ -80,14 +94,9 @@ float nearestNeighbor(float* pVals, char str){
 float resitanceMeasure(uint32_t reading){
   // ADC
   float V = (float)reading / maxADC * ADCvoltage;
-  float resistance;
-  if (reading < bitThreshold){
+  float resistance = -1;
+  if (reading > bitThreshold){
     // invalidate below threshold
-    Serial.print("   INVALID!   ");
-    resistance -1;
-  }
-  else {
-    // basic resistance formula
     resistance = Rconst * (ADCvoltage - V) / V;
   }
   return resistance;
@@ -154,9 +163,9 @@ void loop()
       xResistance[i] = resitanceMeasure(xReadings[i]);
       yResistance[i] = resitanceMeasure(yReadings[i]);
       zResistance[i] = resitanceMeasure(zReadings[i]);
-      xIntensity[i] = 1e3 / xResistance[i];
-      yIntensity[i] = 1e3 / yResistance[i];
-      zIntensity[i] = 1e3 / zResistance[i];
+      xIntensity[i] = 1e6 / xResistance[i];
+      yIntensity[i] = 1e6 / yResistance[i];
+      zIntensity[i] = 1e6 / zResistance[i];
 #if READOUT == 1
       Serial.print("\tRx: ");
       Serial.print(xResistance[i]);
@@ -175,13 +184,14 @@ void loop()
     float xICorrected = nearestNeighbor(xIntensity, "X");
     float yICorrected = nearestNeighbor(yIntensity, "Y");
     float zICorrected = nearestNeighbor(zIntensity, "Z");
+    Serial.println("");
 #if READOUT ==1
-    Serial.print("x_corrected: ");
-    Serial.print(xICorrected);
-    Serial.print("\ty_corrected: ");
-    Serial.print(yICorrected);
-    Serial.print("\tz_corrected: ");
-    Serial.println(zICorrected);
+    //erial.print("x_corrected: ");
+    //erial.print(xICorrected);
+    //erial.print("\ty_corrected: ");
+    //erial.print(yICorrected);
+    //erial.print("\tz_corrected: ");
+    //erial.println(zICorrected);
 #endif
 
     //Sunvector
