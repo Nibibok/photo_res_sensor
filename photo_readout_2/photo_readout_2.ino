@@ -8,10 +8,8 @@ constexpr float period = 1e6 / 1; // readout period in microseconds (1 s rn)
 uint32_t lastT = 0;
 constexpr float Rconst = 10000; // resistance (ohm) of the constant resistor (pm 5%)
 constexpr int bitres = 10;
-constexpr float power = 1.0; // power of the inverse resitance law
-int xVec[3] = {1, 0, 0}; // vector component of a sensor side
-int yVec[3] = {0, 1, 0};
-int zVec[3] = {0, 0, 1};
+//constexpr float power = 1.0; // power of the inverse resitance law
+constexpr uint32_t bitThreshold = 20;
 
 constexpr int REDUNDANCY = 4; // number of redundant readings to average out noise
 constexpr int AVG_SIZE = 1;
@@ -21,7 +19,7 @@ uint32_t maxADC = (pow(2, 10) - 1) * AVG_SIZE;
 
 constexpr int outPin[3][REDUNDANCY] = {{2, 3, 4, 5}, { 6, 7, 8, 9}, {10, 11, 12, 13}}; // output pins for the sensors
 
-#define READOUT 0 // set to 1 to enable serial readout, 0 to disable
+#define READOUT 1 // set to 1 to enable serial readout, 0 to disable
 
 void setup()
 {
@@ -42,30 +40,58 @@ void setup()
   pinMode(A5, INPUT);
 }
 
+
 float nearestNeighbor(float* pVals, char str){
   // Find the binomial pairs with the lowes difference and take their average
-  int p1=-1, p2=-1;
-  float diff = -1; //Initialize with impossible value 
+  int p1=-1, p2=-1; //Initialize with easy to spots
+  float diff = -1; 
+  int invalids = 0;
+  float valMax = pVals[0]; 
   for (int i=0; i < REDUNDANCY; i++){
+    // count the numper of invalid measurements (set below 0)
+    if (pVals[i] < 0){invalids += 1;}
+    if (pVals[i] > valMax){valMax = pVals[i];}
     for (int j=i+1; j < REDUNDANCY; j++){
-      if (i != j){
-        float diffNew = fabs(pVals[i] - pVals[j]);
-        // Update to the smallest difference
-        if (diffNew < diff || diff==-1){diff = diffNew; p1 = i; p2 = j;}
-      }
+      float diffNew = fabs(pVals[i] - pVals[j]);
+      // Update to the smallest difference
+      if ((diffNew < diff || diff==-1) && (pVals[i])!= -1){diff = diffNew; p1 = i; p2 = j;}
     }
   }
+  // At least two valid indices
   if (p1 !=-1 || p2 !=-1){  
-    // Check whether a valid index has been found
     float nearestAverage = (pVals[p1] + pVals[p2])/2;
     return nearestAverage;
     }
+  // Everything is invalid -> return 0?
+  else if (invalids == 4){
+    return 0; 
+  }
+  // Redundancy is exhausted -> return only valid
+  else if (invalids ==3){
+    return valMax;
+  } 
+  // Fkd up big
   else {
-    // 0s can be used to ignore
-    return 0;
+    return -1; 
     }
 }
 
+
+float resitanceMeasure(uint32_t reading){
+  // ADC
+  float V = (float)reading / maxADC * ADCvoltage;
+  float resistance;
+  if (reading < bitThreshold){
+    // invalidate below threshold
+    Serial.print("   INVALID!   ");
+    resistance -1;
+  }
+  else {
+    // basic resistance formula
+    resistance = Rconst * (ADCvoltage - V) / V;
+  }
+  return resistance;
+}
  
 
 void loop()
@@ -78,15 +104,12 @@ void loop()
     uint32_t xReadings[REDUNDANCY];
     uint32_t yReadings[REDUNDANCY];
     uint32_t zReadings[REDUNDANCY];
-    uint32_t xResistance[REDUNDANCY];
-    uint32_t yResistance[REDUNDANCY];
-    uint32_t zResistance[REDUNDANCY];
+    float xResistance[REDUNDANCY];
+    float yResistance[REDUNDANCY];
+    float zResistance[REDUNDANCY];
     float xIntensity[REDUNDANCY];
     float yIntensity[REDUNDANCY];
     float zIntensity[REDUNDANCY];
-    float xReading;
-    float yReading;
-    float zReading;
     for (int i = 0; i < REDUNDANCY; i++)
     {
       pinMode(outPin[0][i], OUTPUT);
@@ -103,22 +126,16 @@ void loop()
         if (i % 2 == 0)
         {
           // Only values above a usefull threshold are taken in the average
-          xReading = analogRead(A0);
-          yReading = analogRead(A1);
-          zReading = analogRead(A2);
-          //if (xReading > Llimit && Reading < Ulimit ){xReadings[i]+= xReading}
-          //if (yReading > Llimit && Reading < Ulimit ){xReadings[i]+= yReading}
-          //if (zReading > Llimit && Reading < Ulimit ){xReadings[i]+= zReading}
+          xReadings[i] = analogRead(A0);
+          yReadings[i] = analogRead(A1);
+          zReadings[i] = analogRead(A2);
         }
         else
         {
-          xReading = analogRead(A3);
-          yReading = analogRead(A4);
-          zReading = analogRead(A5);
+          xReadings[i] = analogRead(A3);
+          yReadings[i] = analogRead(A4);
+          zReadings[i] = analogRead(A5);
         }
-        xReadings[i]+= xReading;
-        yReadings[i]+= yReading;
-        zReadings[i]+= zReading;
       }
 
       pinMode(outPin[0][i], INPUT);
@@ -134,15 +151,12 @@ void loop()
       Serial.print("\tVz: ");
       Serial.print(zReadings[i]/AVG_SIZE);
 #endif
-      float Vx = (float)xReadings[i] / maxADC * ADCvoltage;
-      float Vy = (float)yReadings[i] / maxADC * ADCvoltage;
-      float Vz = (float)zReadings[i] / maxADC * ADCvoltage;
-      xResistance[i] = Rconst * (ADCvoltage - Vx) / Vx;
-      yResistance[i] = Rconst * (ADCvoltage - Vy) / Vy;
-      zResistance[i] = Rconst * (ADCvoltage - Vz) / Vz;
-      xIntensity[i] = 1e6 / xResistance[i];
-      yIntensity[i] = 1e6 / yResistance[i];
-      zIntensity[i] = 1e6 / zResistance[i];
+      xResistance[i] = resitanceMeasure(xReadings[i]);
+      yResistance[i] = resitanceMeasure(yReadings[i]);
+      zResistance[i] = resitanceMeasure(zReadings[i]);
+      xIntensity[i] = 1e3 / xResistance[i];
+      yIntensity[i] = 1e3 / yResistance[i];
+      zIntensity[i] = 1e3 / zResistance[i];
 #if READOUT == 1
       Serial.print("\tRx: ");
       Serial.print(xResistance[i]);
