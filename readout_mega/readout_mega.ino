@@ -3,18 +3,18 @@
 #include <float.h>
 
 constexpr uint32_t ledPin = 13;   // select the pin for the LED
-float ADCvoltage = 5.0;           // max voltage a pin reads is 5.
 constexpr float period = 1e6 / 1; // readout period in microseconds (1 s rn)
 uint32_t lastT = 0;
 constexpr float Rconst = 10000; // resistance (ohm) of the constant resistor (pm 5%)
 constexpr int bitres = 10;
-//constexpr float power = 1.0; // power of the inverse resitance law
-constexpr uint32_t bitThreshold = 20;
-constexpr int REDUNDANCY = 4; // number of redundant readings to average out noise
-constexpr int AVG_SIZE = 1;
-uint32_t maxADC = (pow(2, 10) - 1) * AVG_SIZE;
+constexpr int AVG_SIZE = 1; //average over
+constexpr uint32_t maxADC = (pow(2, bitres) - 1) * AVG_SIZE; //mega 2560 and uno have 10 bit
+constexpr float ADCvoltage = 5.0;           // max voltage a pin reads is 5.
+constexpr uint32_t bitThreshold = 10;
+constexpr int REDUNDANCY = 4; // number of redundant readings
 constexpr int outPin[3][REDUNDANCY] = {{2, 3, 4, 5}, { 6, 7, 8, 9}, {10, 11, 12, 13}}; // output pins for the sensors
-uint32_t mode = 0; // this mode uses the 
+constexpr uint8_t pins[3][REDUNDANCY] = {{A0, A1, A2, A3}, {A4, A5, A6, A7}, {A8, A9, A10, A11}}; //readout pins
+constexpr float law = 1; // power of the inverse law of photoresistor.
 
 
 #define READOUT 1 // set to 1 to enable serial readout, 0 to disable
@@ -37,16 +37,18 @@ void setup()
   pinMode(A3, INPUT);
   pinMode(A4, INPUT);
   pinMode(A5, INPUT);
+  pinMode(A6, INPUT);
+  pinMode(A7, INPUT);
+  pinMode(A8, INPUT);
+  pinMode(A9, INPUT);
+  pinMode(A10, INPUT);
+  pinMode(A11, INPUT);
 }
 
-// void vectorChecker(g1, g2){
-//   for (int i= 0; i< 3, I++)
 
-// }
 
-float nearestNeighbor(float* pVals, char str){
+float nearestNeighbor(float* pVals, const int coord){
   // Find the binomial pairs with the lowes difference and take their average
-  //Serial.println(str);
   int p1=-1, p2=-1; //Initialize with easy to spots
   float diff = 1e10; 
   int invalids = 0;
@@ -70,10 +72,10 @@ float nearestNeighbor(float* pVals, char str){
         }
     }
   }
-  // Everything is invalid -> return 0?
+  // Everything below threshold assume legitimate 0
   if (invalids == 4){
-    Serial.print(" ALL BAD ");
-    return -1; 
+    Serial.print(" Legit 0 ");
+    return 0; 
   }
   // Redundancy is exhausted -> return only valid
   else if (invalids ==3){
@@ -83,22 +85,23 @@ float nearestNeighbor(float* pVals, char str){
   // At least two valid indices
   else if (p1 !=-1 && p2 !=-1){  
     float nearestAverage = (pVals[p1] + pVals[p2])/2;
-    Serial.print(" ALL GOOD ");
+    Serial.print(" GOOD SET ");
     Serial.print("  Invalids  ");
     Serial.print(invalids);
     return nearestAverage;
     }
-  // Fkd up big
+  // This should only happen ilogically
   else {
-    Serial.print(" TF ??? ");
+    Serial.print(" BAD ??? ");
     return -1; 
     }
 }
 
 
 float resitanceMeasure(uint32_t reading){
-  // ADC
+  // Do ADC and calculae the resustance
   float V = (float)reading / maxADC * ADCvoltage;
+  // Below threshold is marked with -1
   float resistance = -1;
   if (reading > bitThreshold){
     // invalidate below threshold
@@ -106,7 +109,20 @@ float resitanceMeasure(uint32_t reading){
   }
   return resistance;
 }
- 
+
+void sunVec(float* r, float* result){
+  //calculate norm even with 0 readings
+  float sqSum = 0; 
+  for (int i=0; i<3; i++){
+    if (r[i] > 0){
+      sqSum += pow(r[i], -2/law);    
+    }
+  }
+  for (int i=0; i<3; i++)
+    if (r[i] > 0){
+      result[i] = pow(r[i], -1/law)/sqrt(sqSum);    
+    }
+}
 
 void loop()
 {
@@ -129,26 +145,10 @@ void loop()
       digitalWrite(outPin[0][i], HIGH);
       digitalWrite(outPin[1][i], HIGH);
       digitalWrite(outPin[2][i], HIGH);
-      xReadings[i] = 0;
-      yReadings[i] = 0;
-      zReadings[i] = 0;
-      for (int j = 0; j < AVG_SIZE; j++)
-      {
-        if (i % 2 == 0)
-        {
-          // Only values above a usefull threshold are taken in the average
-          xReadings[i] = analogRead(A0);
-          yReadings[i] = analogRead(A1);
-          zReadings[i] = analogRead(A2);
-        }
-        else
-        {
-          xReadings[i] = analogRead(A3);
-          yReadings[i] = analogRead(A4);
-          zReadings[i] = analogRead(A5);
-        }
-      }
-
+      xReadings[i] = analogRead(pins[0][i]);
+      yReadings[i] = analogRead(pins[1][i]);
+      zReadings[i] = analogRead(pins[2][i]);
+      delay(10); // Assume the arduino wants to set a pin to INPUT very fast
       pinMode(outPin[0][i], INPUT);
       pinMode(outPin[1][i], INPUT);
       pinMode(outPin[2][i], INPUT);
@@ -160,7 +160,7 @@ void loop()
       Serial.print("\tVy: ");
       Serial.print(yReadings[i]/AVG_SIZE);
       Serial.print("\tVz: ");
-      Serial.println(zReadings[i]/AVG_SIZE);
+      Serial.print(zReadings[i]/AVG_SIZE);
 #endif
       xResistance[i] = resitanceMeasure(xReadings[i]);
       yResistance[i] = resitanceMeasure(yReadings[i]);
@@ -171,38 +171,39 @@ void loop()
       Serial.print("\tRy: ");
       Serial.print(yResistance[i]);
       Serial.print("\tRz: ");
-      Serial.print(zResistance[i]);
+      Serial.println(zResistance[i]);
 #endif
     }
-    float xRCorrected = nearestNeighbor(xResistance, "X");
-    float yRCorrected = nearestNeighbor(yResistance, "Y");
-    float zRCorrected = nearestNeighbor(zResistance, "Z");
+    if (nmrMode == 1) {
+
+    }
+    else {
+      float xRCorrected = nearestNeighbor(xResistance, 0);
+      float yRCorrected = nearestNeighbor(yResistance, 1);
+      float zRCorrected = nearestNeighbor(zResistance, 2);
+    }
+    float R[3] = {xRCorrected, yRCorrected, zRCorrected};
     Serial.println("");
 #if READOUT ==1
-    //erial.print("x_corrected: ");
-    //erial.print(xICorrected);
-    //erial.print("\ty_corrected: ");
-    //erial.print(yICorrected);
-    //erial.print("\tz_corrected: ");
-    //erial.println(zICorrected);
+    Serial.print("\tx_corrected: ");
+    Serial.print(xRCorrected);
+    Serial.print("\ty_corrected: ");
+    Serial.print(yRCorrected);
+    Serial.print("\tz_corrected: ");
+    Serial.println(zRCorrected);
 #endif
 
-    //Sunvector
-    // Invalidate if all bad 
-    float norm = sqrt(pow(xRCorrected, -2) + pow(yRCorrected, -2) + pow(zRCorrected, -2));
-    float sunX = pow(xRCorrected, -1)/norm;
-    float sunY = pow(yRCorrected, -1)/norm;
-    float sunZ = pow(zRCorrected, -1)/norm;
+    //get the Sunvector
+    float psunVector[3] = {0,0,0};
+    sunVec(R, psunVector);
     Serial.print("Sx: ");
-    Serial.print(sunX);
+    Serial.print(psunVector[0]);
     Serial.print("   ");
     Serial.print("Sy: ");
-    Serial.print(sunY);
+    Serial.print(psunVector[1]);
     Serial.print("   ");
     Serial.print("Sz: ");
-    Serial.println(sunZ);
-
-
+    Serial.println(psunVector[2]);
     lastT = micros();
   }
 }
